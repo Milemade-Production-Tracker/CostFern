@@ -1,0 +1,49 @@
+name: Publish CostFern image
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Full SHA of the CostFern commit on main to publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Build and publish the Linux AMD64 image
+        shell: bash
+        env:
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ ! "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] ||
+             ! git merge-base --is-ancestor "$SOURCE_COMMIT" "$GITHUB_SHA"; then
+            echo 'Select a full commit SHA from main.' >&2
+            exit 1
+          fi
+
+          context=$(mktemp -d)
+          git archive "$SOURCE_COMMIT" | tar -x -C "$context"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:$SOURCE_COMMIT"
+          docker build --platform linux/amd64 \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$SOURCE_COMMIT" \
+            --tag "$image" "$context"
+
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker push "$image"
+          digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$image")
+          printf 'Source commit: `%s`\n\nDeployment image: `%s`\n' "$SOURCE_COMMIT" "$digest" >> "$GITHUB_STEP_SUMMARY"
