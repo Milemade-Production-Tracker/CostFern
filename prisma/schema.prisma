@@ -1,0 +1,173 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
+// enough when changing adapters.
+// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+  createdAt           DateTime @default(now())
+  scopeUpdatedAt      DateTime?
+
+  @@index([shop, createdAt])
+}
+
+enum ReviewStatus {
+  NEEDS_MATCHING
+  READY
+  REVIEWED
+  FINALIZED
+}
+
+enum ReviewDecision {
+  PENDING
+  APPROVED
+  EXCLUDED
+}
+
+enum ReviewIssue {
+  MISSING_SKU
+  DUPLICATE_SOURCE_SKU
+  MISSING_OLD
+  MISSING_NEW
+  UNMATCHED
+  AMBIGUOUS
+}
+
+enum ReviewEventKind {
+  IMPORTED
+  ROW_UPDATED
+  FINALIZED
+  CORRECTION_CREATED
+}
+
+model Supplier {
+  id        String   @id @default(cuid())
+  shop      String
+  code      String
+  name      String
+  currency  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  reviews   ReviewBatch[]
+
+  @@unique([shop, id])
+  @@unique([shop, code])
+}
+
+model ReviewBatch {
+  id               String       @id @default(cuid())
+  shop             String
+  supplierId       String
+  supplier         Supplier     @relation(fields: [shop, supplierId], references: [shop, id], onDelete: Cascade)
+  supplierCode     String
+  supplierName     String
+  businessId       String
+  parentId         String?
+  parent           ReviewBatch? @relation("Corrections", fields: [shop, parentId], references: [shop, id], onDelete: Cascade)
+  corrections      ReviewBatch[] @relation("Corrections")
+  revision         Int          @default(1)
+  version          Int          @default(1)
+  inputFingerprint String
+  oldFingerprint   String
+  newFingerprint   String
+  oldFilename      String
+  newFilename      String
+  currency         String
+  rowCount         Int
+  status           ReviewStatus
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  finalizedAt      DateTime?
+  finalizedBy      String?
+  exportFingerprint String?
+  quotaWindowKey   String?
+  rows             QuoteLine[]
+  events           ReviewEvent[]
+
+  @@unique([shop, id])
+  @@unique([shop, businessId, revision])
+  @@unique([shop, supplierId, inputFingerprint, revision])
+  @@index([shop, createdAt])
+  @@index([shop, supplierId, finalizedAt])
+}
+
+model QuoteLine {
+  id           String         @id @default(cuid())
+  shop         String
+  reviewId     String
+  review       ReviewBatch    @relation(fields: [shop, reviewId], references: [shop, id], onDelete: Cascade)
+  position     Int
+  sku          String
+  oldCost      Decimal?       @db.Decimal(24, 4)
+  newCost      Decimal?       @db.Decimal(24, 4)
+  oldLine      Int?
+  newLine      Int?
+  issue        ReviewIssue?
+  candidates   Json
+  variantId    String?
+  variantSku   String?
+  variantTitle String?
+  productTitle String?
+  imageUrl     String?
+  imageAlt     String?
+  decision     ReviewDecision @default(PENDING)
+  note         String?
+  decidedAt    DateTime?
+  decidedBy    String?
+
+  @@unique([shop, reviewId, position])
+  @@unique([shop, reviewId, variantId])
+}
+
+model ReviewEvent {
+  id        String          @id @default(cuid())
+  shop      String
+  reviewId  String
+  review    ReviewBatch     @relation(fields: [shop, reviewId], references: [shop, id], onDelete: Cascade)
+  version   Int
+  kind      ReviewEventKind
+  actor     String
+  createdAt DateTime        @default(now())
+  details   Json
+
+  @@unique([shop, reviewId, version])
+}
+
+model ReviewUsage {
+  shop      String
+  windowKey String
+  used      Int    @default(0)
+
+  @@id([shop, windowKey])
+}
+
+model EntitlementAnchor {
+  shop     String   @id
+  anchorAt DateTime
+}
