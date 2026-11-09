@@ -23,11 +23,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Build and publish the Linux AMD64 image
+      - name: Build the Linux AMD64 image
         shell: bash
         env:
           SOURCE_COMMIT: ${{ inputs.source_commit }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [[ ! "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] ||
              ! git merge-base --is-ancestor "$SOURCE_COMMIT" "$GITHUB_SHA"; then
@@ -42,8 +41,54 @@ jobs:
             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
             --label "org.opencontainers.image.revision=$SOURCE_COMMIT" \
             --tag "$image" "$context"
+          echo "COSTFERN_IMAGE=$image" >> "$GITHUB_ENV"
 
+      - name: Verify startup with PostgreSQL and 512 MiB RAM
+        shell: bash
+        run: |
+          docker network create costfern-smoke
+          docker run -d --name costfern-smoke-db --network costfern-smoke \
+            -e POSTGRES_PASSWORD=fixture -e POSTGRES_DB=costfern_smoke postgres:17-alpine
+
+          for attempt in {1..30}; do
+            if docker exec costfern-smoke-db pg_isready -h 127.0.0.1 -U postgres -d costfern_smoke; then
+              break
+            fi
+            sleep 1
+          done
+          docker exec costfern-smoke-db psql -U postgres -d costfern_smoke -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE costfern LOGIN PASSWORD 'fixture'; ALTER DATABASE costfern_smoke OWNER TO costfern;"
+
+          docker run -d --name costfern-smoke-web --network costfern-smoke \
+            --memory=512m --memory-swap=512m -p 127.0.0.1::3000 \
+            -e PORT=3000 -e SCOPES=read_products \
+            -e SHOPIFY_API_KEY=fixture -e SHOPIFY_API_SECRET=fixture \
+            -e SHOPIFY_APP_URL=https://costfern.invalid \
+            -e 'DATABASE_URL=postgresql://costfern:fixture@costfern-smoke-db:5432/costfern_smoke?schema=public' \
+            "$COSTFERN_IMAGE"
+          address=$(docker port costfern-smoke-web 3000/tcp)
+          for attempt in {1..45}; do
+            if page=$(curl -fsS --max-time 3 "http://$address/" 2>/dev/null) &&
+               [[ "$page" == *'CostFern'* ]]; then
+              docker stats --no-stream costfern-smoke-web
+              exit 0
+            fi
+            if [[ $(docker inspect --format '{{.State.Running}}' costfern-smoke-web) != true ]]; then
+              break
+            fi
+            sleep 2
+          done
+          docker inspect --format 'exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' costfern-smoke-web
+          docker logs --tail 80 costfern-smoke-web
+          exit 1
+
+      - name: Publish to GHCR
+        shell: bash
+        env:
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          docker push "$image"
-          digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$image")
+          docker push "$COSTFERN_IMAGE"
+          digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$COSTFERN_IMAGE")
           printf 'Source commit: `%s`\n\nDeployment image: `%s`\n' "$SOURCE_COMMIT" "$digest" >> "$GITHUB_STEP_SUMMARY"
