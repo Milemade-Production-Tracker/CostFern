@@ -2,6 +2,8 @@
 
 CostFern is an embedded Shopify app for reviewing supplier cost changes. It compares two CSV quotes against the shop’s variants, records line decisions and exports an immutable list of approved costs. Shopify catalog access uses read_products. Reviews and approvals are stored in PostgreSQL.
 
+See the [development handoff](docs/DEVELOPMENT-HANDOFF.md) for recovery on another computer, the App Store submission record and the hosted release.
+
 ## Local development
 
 Use Node.js 22.12 or newer, Shopify CLI and a local PostgreSQL instance. Copy .env.example to the ignored .env file and set DATABASE_URL to your CostFern database. For database tests, also set COSTFERN_TEST_DATABASE_URL to a separate localhost database named costfern_test and apply the same Prisma migrations to it. Replace the example store domain in the commands with the development store authorized for your app.
@@ -10,7 +12,7 @@ Use Node.js 22.12 or newer, Shopify CLI and a local PostgreSQL instance. Copy .e
 npm.cmd ci
 $env:RUST_LOG = 'info'
 npm.cmd run setup
-shopify app dev --store your-dev-store.myshopify.com
+shopify app dev --config shopify.app.toml --store your-dev-store.myshopify.com
 ```
 
 Open the CLI preview link in the signed-in Shopify browser. The app uses the existing CostFern entry in Dev Dashboard. For a new local database, run setup before opening the app. RUST_LOG=info also works around the Prisma schema-engine startup failure observed on this Windows host.
@@ -42,12 +44,12 @@ Set these variables in the PowerShell session before starting the preview. Use s
 $env:COSTFERN_DEV_SHOP = 'your-dev-store.myshopify.com'
 $env:COSTFERN_DEV_TIER = 'starter'
 $env:RUST_LOG = 'info'
-shopify app dev --store your-dev-store.myshopify.com
+shopify app dev --config shopify.app.toml --store your-dev-store.myshopify.com
 ```
 
 ### Shopify App Pricing
 
-The Shopify Partner Dashboard pricing draft has three public plans and five recurring choices. Their handles are `starter`, `growth` and `pro`, with `/app/plan` as the welcome path for each. The app checks the authoritative subscription through the Partner API before granting plan access. Set the following in the server environment.
+Shopify App Pricing is configured with three public plans and five recurring choices. Their handles are `starter`, `growth` and `pro`, with `/app/plan` as the welcome path for each. The app checks the authoritative subscription through the Partner API before granting plan access. Set the following in the server environment.
 
 - SHOPIFY_PARTNER_ORG_ID, SHOPIFY_PARTNER_API_ACCESS_TOKEN with Manage apps access, and SHOPIFY_APP_GID for CostFern
 - SHOPIFY_APP_HANDLE for the Shopify-hosted pricing link
@@ -84,4 +86,4 @@ The approved [UI proposal](design-preview/README.md) is implemented on Review Qu
 
 The development-store UI regression on November 9, 2026 confirmed native two-file upload and duplicate reopening, supplier create/edit and duplicate-code validation, SKU matching and decision validation, linked correction navigation, locked CSV and audit downloads, History filtering and comparison, and Plan price comparison plus the Shopify-hosted link. At a 480 px browser viewport, the seven review rows became cards without page-level horizontal scrolling. Temporary QA suppliers and corrections were removed after verification. The original export hash and the 1 of 150 usage ledger matched baseline, and Partner API readback confirmed the Pro annual USD 0 contract.
 
-Release verification includes a production database backup and restore, an Admin API request with the production IP allowlist enforced, and verification of live configuration before App Store submission.
+The hosted release passed development-store review and export checks with the Shopify Admin API IP allowlist enforced. The owner reported manually submitting the app on November 10, 2026. The [development handoff](docs/DEVELOPMENT-HANDOFF.md) records the release identifiers and verification scope.
